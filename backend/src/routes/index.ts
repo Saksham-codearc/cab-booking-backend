@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { apiLimiter } from "../middleware/rateLimit.js";
 import { authRouter } from "./auth.js";
+import { estimateRouter } from "./estimate.js";
 import { healthRouter } from "./health.js";
 import { profileRouter } from "./profile.js";
 import { ridesRouter } from "./rides.js";
@@ -15,4 +16,6 @@ apiRouter.use(apiLimiter);
 apiRouter.use(healthRouter);
 apiRouter.use(authRouter);
 apiRouter.use(profileRouter);
+// estimateRouter must precede ridesRouter: "/rides/estimate" vs "/rides/:id".
+apiRouter.use(estimateRouter);
 apiRouter.use(ridesRouter);

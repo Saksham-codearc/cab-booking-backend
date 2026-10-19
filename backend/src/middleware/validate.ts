@@ -22,3 +22,39 @@ export function validateBody<T>(schema: ZodType<T>): RequestHandler {
     next();
   };
 }
+
+/** Validates `req.query` against a zod schema; on success replaces `req.query`. */
+export function validateQuery<T>(schema: ZodType<T>): RequestHandler {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.query);
+
+    if (!result.success) {
+      res.status(400).json({
+        success: false,
+        message: firstIssueMessage(result.error),
+      });
+      return;
+    }
+
+    req.query = result.data as typeof req.query;
+    next();
+  };
+}
+
+/** Validates route params against a zod schema; on success replaces `req.params`. */
+export function validateParams<T>(schema: ZodType<T>): RequestHandler {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.params);
+
+    if (!result.success) {
+      res.status(400).json({
+        success: false,
+        message: firstIssueMessage(result.error),
+      });
+      return;
+    }
+
+    req.params = result.data as typeof req.params;
+    next();
+  };
+}

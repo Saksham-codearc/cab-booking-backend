@@ -13,6 +13,7 @@ const envSchema = z.object({
   CLERK_SECRET_KEY: z.string().min(1, "is required"),
   SUPABASE_URL: z.url("must be a valid URL"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "is required"),
+  GOOGLE_MAPS_SERVER_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse({
@@ -43,4 +44,5 @@ export const env = {
   clerkSecretKey: parsed.data.CLERK_SECRET_KEY,
   supabaseUrl: parsed.data.SUPABASE_URL,
   supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,
+  mapsServerKey: parsed.data.GOOGLE_MAPS_SERVER_KEY ?? "",
 } as const;
