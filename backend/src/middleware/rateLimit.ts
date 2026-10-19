@@ -1,25 +1,7 @@
-import rateLimit from "express-rate-limit";
+import { rateLimit } from 'express-rate-limit';
 
-/** Baseline limit for every API route. */
-export const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 100,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  message: {
-    success: false,
-    message: "Too many requests. Please try again shortly.",
-  },
-});
-
-/** Stricter limit for state-changing routes. */
-export const writeLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 20,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  message: {
-    success: false,
-    message: "Too many requests. Please try again in a minute.",
-  },
-});
+export const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 100 });
+export const bookingLimiter = rateLimit({ windowMs: 60*1000, max: 20 });
+export const acceptLimiter = rateLimit({ windowMs: 60*1000, max: 30 });
+export const paymentLimiter = rateLimit({ windowMs: 60*1000, max: 20 });
+export const generalLimiter = rateLimit({ windowMs: 60*1000, max: 120 });

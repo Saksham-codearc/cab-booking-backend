@@ -1,10 +1,10 @@
 # dependencies
 node_modules/
 
-# nested repo: frontend/ is tracked by its own git repository
+
 /frontend/
 
-# env files (never commit secrets)
+# env files 
 .env
 .env.*
 !.env.example

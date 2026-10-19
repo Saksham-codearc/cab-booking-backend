@@ -1,158 +1,45 @@
-import { env } from "../config/env.js";
+import env from '../config/env.js';
 
-export type RideType = "standard" | "premium" | "xl";
-
-interface FareConfigEntry {
-  base: number;
-  perKm: number;
-  min: number;
-}
-
-/** Fare inputs in INR. Server-side only — clients never send prices. */
-export const FARE_CONFIG: Record<RideType, FareConfigEntry> = {
-  standard: { base: 30, perKm: 12, min: 50 },
-  premium: { base: 60, perKm: 18, min: 120 },
-  xl: { base: 80, perKm: 20, min: 150 },
-};
-
-export const RIDE_TYPES = Object.keys(FARE_CONFIG) as RideType[];
-
-export function quoteFare(type: RideType, distanceKm: number): number {
-  const config = FARE_CONFIG[type];
-  return Math.max(
-    config.min,
-    Math.round(config.base + config.perKm * Math.max(0, distanceKm))
-  );
-}
-
-/** Distance between two WGS84 coordinates in kilometres. */
-export function haversineKm(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number }
-): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const earthRadiusKm = 6371;
-
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-
-  return 2 * earthRadiusKm * Math.asin(Math.sqrt(h));
-}
-
-/** Deterministic string hash (FNV-1a) so fallback estimates never flicker. */
-function stableHash(value: string): number {
-  let hash = 0x811c9dc5;
-
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-
-  return Math.abs(hash);
-}
-
-export interface TripQuote {
+export type RideType = 'standard' | 'premium' | 'xl';
+export interface FareInput {
   distanceKm: number;
   durationMin: number;
-  currency: "INR";
-  source: "google" | "heuristic";
-  fares: Record<RideType, number>;
+  rideType: RideType;
 }
 
-/**
- * Estimates a trip. Primary source is Google's Distance Matrix (requires
- * GOOGLE_MAPS_SERVER_KEY + billing); any failure falls back to a stable
- * heuristic so the booking flow never breaks. The source is always reported.
- */
-export async function quoteAll(
-  pickup: string,
-  destination: string
-): Promise<TripQuote> {
-  const google = await googleDistance(pickup, destination);
+const BASE: Record<RideType, number> = {
+  standard: 40,
+  premium: 70,
+  xl: 120,
+};
+const PER_KM: Record<RideType, number> = {
+  standard: 15,
+  premium: 25,
+  xl: 35,
+};
+const PER_MIN: Record<RideType, number> = {
+  standard: 2,
+  premium: 3,
+  xl: 4,
+};
 
-  const { distanceKm, durationMin, source } =
-    google ?? heuristicDistance(pickup, destination);
-
+export function calculateFare(input: FareInput) {
+  const dist = Number(input.distanceKm) || 0;
+  const dur = Number(input.durationMin) || 0;
+  const base = BASE[input.rideType] ?? 40;
+  const perKm = PER_KM[input.rideType] ?? 15;
+  const perMin = PER_MIN[input.rideType] ?? 2;
+  const estimated = base + dist * perKm + dur * perMin;
+  const feePct = env.PLATFORM_FEE_PERCENT || 20;
+  const platformFee = estimated * (feePct / 100);
+  const driverEarnings = estimated - platformFee;
   return {
-    distanceKm: Math.round(distanceKm * 100) / 100,
-    durationMin: Math.round(durationMin),
-    currency: "INR",
-    source,
-    fares: Object.fromEntries(
-      RIDE_TYPES.map((type) => [type, quoteFare(type, distanceKm)])
-    ) as Record<RideType, number>,
-  };
-}
-
-async function googleDistance(
-  pickup: string,
-  destination: string
-): Promise<{ distanceKm: number; durationMin: number; source: "google" } | null> {
-  const key = env.mapsServerKey;
-
-  if (!key) {
-    return null;
-  }
-
-  try {
-    const url = new URL(
-      "https://maps.googleapis.com/maps/api/distancematrix/json"
-    );
-    url.searchParams.set("origins", pickup);
-    url.searchParams.set("destinations", destination);
-    url.searchParams.set("key", key);
-
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(5_000),
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as {
-      rows?: Array<{
-        elements?: Array<{
-          distance?: { value?: number };
-          duration?: { value?: number };
-          status?: string;
-        }>;
-      }>;
-    };
-
-    const element = data.rows?.[0]?.elements?.[0];
-
-    if (
-      element?.status !== "OK" ||
-      typeof element.distance?.value !== "number" ||
-      typeof element.duration?.value !== "number"
-    ) {
-      return null;
-    }
-
-    return {
-      distanceKm: element.distance.value / 1000,
-      durationMin: element.duration.value / 60,
-      source: "google",
-    };
-  } catch {
-    return null;
-  }
-}
-
-function heuristicDistance(
-  pickup: string,
-  destination: string
-): { distanceKm: number; durationMin: number; source: "heuristic" } {
-  const distanceKm = 4 + (stableHash(`${pickup.trim().toLowerCase()}|${destination.trim().toLowerCase()}`) % 160) / 10;
-
-  return {
-    distanceKm,
-    durationMin: Math.round((distanceKm / 25) * 60),
-    source: "heuristic",
+    estimatedFare: Math.round(estimated * 100) / 100,
+    baseFare: base,
+    platformFee: Math.round(platformFee * 100) / 100,
+    driverEarnings: Math.round(driverEarnings * 100) / 100,
+    surgeMultiplier: 1.0,
+    currency: 'INR',
+    finalFare: Math.round(estimated * 100) / 100,
   };
 }

@@ -1,60 +1,49 @@
-import type { RequestHandler } from "express";
-import type { ZodType } from "zod";
-import { firstIssueMessage } from "../lib/validation.js";
+import { ZodSchema } from 'zod';
+import { Request, Response, NextFunction } from 'express';
 
 /**
- * Validates `req.body` against a zod schema.
- * On success the parsed (and normalized) value replaces `req.body`.
+ * Express 5 exposes `req.query` through a prototype getter, so plain
+ * assignment throws ("Cannot set property query"). Redefine the property on
+ * the request instance instead so validated values are visible downstream.
  */
-export function validateBody<T>(schema: ZodType<T>): RequestHandler {
-  return (req, res, next) => {
+function replaceRequestProperty(req: Request, key: 'query' | 'params', value: unknown) {
+  Object.defineProperty(req, key, {
+    value,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+}
+
+export function validateBody(schema: ZodSchema) {
+  return (req: Request, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.body);
-
     if (!result.success) {
-      res.status(400).json({
-        success: false,
-        message: firstIssueMessage(result.error),
-      });
-      return;
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: result.error.flatten() });
     }
-
     req.body = result.data;
     next();
   };
 }
 
-/** Validates `req.query` against a zod schema; on success replaces `req.query`. */
-export function validateQuery<T>(schema: ZodType<T>): RequestHandler {
-  return (req, res, next) => {
+export function validateQuery(schema: ZodSchema) {
+  return (req: Request, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.query);
-
     if (!result.success) {
-      res.status(400).json({
-        success: false,
-        message: firstIssueMessage(result.error),
-      });
-      return;
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: result.error.flatten() });
     }
-
-    req.query = result.data as typeof req.query;
+    replaceRequestProperty(req, 'query', result.data);
     next();
   };
 }
 
-/** Validates route params against a zod schema; on success replaces `req.params`. */
-export function validateParams<T>(schema: ZodType<T>): RequestHandler {
-  return (req, res, next) => {
+export function validateParams(schema: ZodSchema) {
+  return (req: Request, res: Response, next: NextFunction) => {
     const result = schema.safeParse(req.params);
-
     if (!result.success) {
-      res.status(400).json({
-        success: false,
-        message: firstIssueMessage(result.error),
-      });
-      return;
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: result.error.flatten() });
     }
-
-    req.params = result.data as typeof req.params;
+    replaceRequestProperty(req, 'params', result.data);
     next();
   };
 }

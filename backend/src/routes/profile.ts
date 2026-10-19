@@ -1,97 +1,52 @@
-import { Router } from "express";
-import { clerkClient, getAuth, requireAuth } from "@clerk/express";
-import { HttpError, asyncHandler } from "../lib/http.js";
-import { writeLimiter } from "../middleware/rateLimit.js";
-import { supabase } from "../lib/supabase.js";
+import { Router } from 'express';
+import { requireAuth, getAuth, clerkClient } from '@clerk/express';
+import { supabase } from '../lib/supabase.js';
+import { asyncHandler } from '../lib/http.js';
+import { requireProfile, AuthedRequest } from '../middleware/auth.js';
 
-export const profileRouter = Router();
+const router = Router();
 
-profileRouter.post(
-  "/profile/sync",
-  writeLimiter,
-  requireAuth(),
-  asyncHandler(async (req, res) => {
-    const { userId } = getAuth(req);
+router.get('/profile/me', requireAuth(), requireProfile, (req, res) => {
+  const profile = (req as AuthedRequest).profile;
+  return res.status(200).json({ success: true, profile });
+});
 
-    if (!userId) {
-      throw new HttpError(401, "Authentication required");
-    }
+router.post('/profile/sync', requireAuth(), asyncHandler(async (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) return res.status(401).json({ success: false, message: 'Authentication required' });
 
-    // Get verified profile information from Clerk.
-    const client = await clerkClient;
-    const clerkUser = await client.users.getUser(userId);
+  const client = await clerkClient;
+  const clerkUser = await client.users.getUser(userId);
+  const fullName = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || 'New Rider';
+  const email = clerkUser.primaryEmailAddress?.emailAddress ?? null;
+  const phone = clerkUser.primaryPhoneNumber?.phoneNumber ?? null;
+  const avatarUrl = clerkUser.imageUrl ?? null;
 
-    const fullName =
-      [clerkUser.firstName, clerkUser.lastName]
-        .filter(Boolean)
-        .join(" ") || "New Rider";
+  const { data: existing, error: lookupError } = await supabase
+    .from('profiles')
+    .select('id, role')
+    .eq('clerk_user_id', userId)
+    .maybeSingle();
+  if (lookupError) return res.status(500).json({ success: false, message: 'Could not retrieve profile' });
 
-    const email = clerkUser.primaryEmailAddress?.emailAddress ?? null;
-    const phone = clerkUser.primaryPhoneNumber?.phoneNumber ?? null;
-    const avatarUrl = clerkUser.imageUrl ?? null;
-
-    // Look for an existing application profile.
-    const { data: existing, error: lookupError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("clerk_user_id", userId)
-      .maybeSingle();
-
-    if (lookupError) {
-      throw new HttpError(500, "Could not retrieve profile", {
-        cause: lookupError,
-      });
-    }
-
-    if (existing) {
-      // Update profile details without changing the user's role.
-      const { data, error } = await supabase
-        .from("profiles")
-        .update({
-          full_name: fullName,
-          email,
-          phone,
-          avatar_url: avatarUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existing.id)
-        .select("id, full_name, email, role")
-        .single();
-
-      if (error) {
-        throw new HttpError(500, "Could not update profile", { cause: error });
-      }
-
-      res.status(200).json({
-        success: true,
-        message: "Profile synchronized",
-        profile: data,
-      });
-      return;
-    }
-
-    // New accounts always start as riders.
+  if (existing) {
     const { data, error } = await supabase
-      .from("profiles")
-      .insert({
-        clerk_user_id: userId,
-        full_name: fullName,
-        email,
-        phone,
-        avatar_url: avatarUrl,
-        role: "rider",
-      })
-      .select("id, full_name, email, role")
+      .from('profiles')
+      .update({ full_name: fullName, email, phone, avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+      .eq('id', existing.id)
+      .select('id, full_name, email, role')
       .single();
+    if (error) return res.status(500).json({ success: false, message: 'Could not update profile' });
+    return res.status(200).json({ success: true, message: 'Profile synchronized', profile: data });
+  }
 
-    if (error) {
-      throw new HttpError(500, "Could not create profile", { cause: error });
-    }
+  const { data, error } = await supabase
+    .from('profiles')
+    .insert({ clerk_user_id: userId, full_name: fullName, email, phone, avatar_url: avatarUrl, role: 'rider' })
+    .select('id, full_name, email, role')
+    .single();
+  if (error) return res.status(500).json({ success: false, message: 'Could not create profile' });
+  return res.status(201).json({ success: true, message: 'Profile created', profile: data });
+}));
 
-    res.status(201).json({
-      success: true,
-      message: "Profile created",
-      profile: data,
-    });
-  })
-);
+export default router;

@@ -1,48 +1,41 @@
-import "dotenv/config";
-import { z } from "zod";
+import dotenv from 'dotenv';
 
-// Treat blank values as missing so defaults still apply.
-function emptyToUndefined(value: unknown): unknown {
-  return typeof value === "string" && value.trim() === "" ? undefined : value;
+dotenv.config();
+
+function required(name: string, value: string | undefined): string {
+  if (!value || value.trim() === '') {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
 }
 
-const envSchema = z.object({
-  PORT: z.coerce.number().int().min(1).max(65535).default(5000),
-  CORS_ORIGIN: z.string().default("http://localhost:3000"),
-  CLERK_PUBLISHABLE_KEY: z.string().min(1, "is required"),
-  CLERK_SECRET_KEY: z.string().min(1, "is required"),
-  SUPABASE_URL: z.url("must be a valid URL"),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, "is required"),
-  GOOGLE_MAPS_SERVER_KEY: z.string().optional(),
-});
+const PORT = Number(process.env.PORT) || 5000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
-const parsed = envSchema.safeParse({
-  PORT: emptyToUndefined(process.env.PORT),
-  CORS_ORIGIN: emptyToUndefined(process.env.CORS_ORIGIN),
-  CLERK_PUBLISHABLE_KEY: emptyToUndefined(process.env.CLERK_PUBLISHABLE_KEY),
-  CLERK_SECRET_KEY: emptyToUndefined(process.env.CLERK_SECRET_KEY),
-  SUPABASE_URL: emptyToUndefined(process.env.SUPABASE_URL),
-  SUPABASE_SERVICE_ROLE_KEY: emptyToUndefined(
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  ),
-});
+const env = {
+  PORT,
+  NODE_ENV,
+  FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
+  CORS_ORIGIN: process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:3000',
 
-if (!parsed.success) {
-  const details = parsed.error.issues
-    .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
-    .join("\n");
+  CLERK_PUBLISHABLE_KEY: required('CLERK_PUBLISHABLE_KEY', process.env.CLERK_PUBLISHABLE_KEY),
+  CLERK_SECRET_KEY: required('CLERK_SECRET_KEY', process.env.CLERK_SECRET_KEY),
 
-  throw new Error(`Invalid environment variables:\n${details}`);
-}
+  SUPABASE_URL: required('SUPABASE_URL', process.env.SUPABASE_URL),
+  SUPABASE_SERVICE_ROLE_KEY: required('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY),
 
-export const env = {
-  port: parsed.data.PORT,
-  corsOrigins: parsed.data.CORS_ORIGIN.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-  clerkPublishableKey: parsed.data.CLERK_PUBLISHABLE_KEY,
-  clerkSecretKey: parsed.data.CLERK_SECRET_KEY,
-  supabaseUrl: parsed.data.SUPABASE_URL,
-  supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,
-  mapsServerKey: parsed.data.GOOGLE_MAPS_SERVER_KEY ?? "",
-} as const;
+  GOOGLE_MAPS_SERVER_KEY: process.env.GOOGLE_MAPS_SERVER_KEY || '',
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || '',
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || '',
+  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+  PLATFORM_FEE_PERCENT: Number(process.env.PLATFORM_FEE_PERCENT) || 20,
+
+  SMTP_HOST: process.env.SMTP_HOST || '',
+  SMTP_PORT: Number(process.env.SMTP_PORT) || 587,
+  SMTP_USER: process.env.SMTP_USER || '',
+  SMTP_PASS: process.env.SMTP_PASS || '',
+  RECEIPT_FROM_EMAIL: process.env.RECEIPT_FROM_EMAIL || process.env.SMTP_USER || '',
+};
+
+export default env;
+export type Env = typeof env;

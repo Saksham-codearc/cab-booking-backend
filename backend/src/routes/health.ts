@@ -1,29 +1,24 @@
-import { Router } from "express";
-import { HttpError, asyncHandler } from "../lib/http.js";
-import { supabase } from "../lib/supabase.js";
+import { Router } from 'express';
 
-export const healthRouter = Router();
+const router = Router();
 
-healthRouter.get("/health", (_req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Cab Booking API is running!",
-    timestamp: new Date().toISOString(),
-  });
+router.get('/health', (_req, res) => {
+  res.status(200).json({ success: true, message: 'Cab Booking API is running!', timestamp: new Date().toISOString() });
 });
 
-healthRouter.get(
-  "/db-health",
-  asyncHandler(async (_req, res) => {
-    const { error } = await supabase.from("profiles").select("id").limit(1);
-
+router.get('/db-health', async (_req, res) => {
+  const { supabase } = await import('../lib/supabase.js');
+  try {
+    const { error } = await supabase.from('profiles').select('id').limit(1);
     if (error) {
-      throw new HttpError(500, "Database query failed", { cause: error });
+      console.error('Database query failed:', error.message);
+      return res.status(500).json({ success: false, message: 'Database query failed' });
     }
+    return res.status(200).json({ success: true, message: 'Supabase connection successful' });
+  } catch (error) {
+    console.error('Database connection failed:', error);
+    return res.status(500).json({ success: false, message: 'Database connection failed' });
+  }
+});
 
-    res.status(200).json({
-      success: true,
-      message: "Supabase connection successful",
-    });
-  })
-);
+export default router;
