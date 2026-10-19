@@ -1,8 +1,13 @@
 import { supabase } from "./lib/supabase.js";
+import {
+  firstIssueMessage,
+  rideRequestSchema,
+} from "./lib/validation.js";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
 import {
   clerkMiddleware,
   requireAuth,
@@ -16,15 +21,47 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 
+// Comma-separated list of allowed browser origins.
+const allowedOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+// Baseline limit for every API route.
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests. Please try again shortly.",
+  },
+});
+
+// Stricter limit for state-changing routes.
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests. Please try again in a minute.",
+  },
+});
+
 app.use(helmet());
-app.use(cors());
-app.use(express.json());
+app.use(cors({ origin: allowedOrigins }));
+app.use(express.json({ limit: "50kb" }));
 app.use(
   clerkMiddleware({
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
     secretKey: process.env.CLERK_SECRET_KEY,
   })
 );
+
+app.use("/api", apiLimiter);
 
 app.get("/api/health", (_req, res) => {
   res.status(200).json({
@@ -65,7 +102,7 @@ app.get("/api/db-health", async (_req, res) => {
 });
 
 
-app.post("/api/profile/sync", requireAuth(), async (req, res) => {
+app.post("/api/profile/sync", writeLimiter, requireAuth(), async (req, res) => {
   try {
     const { userId } = getAuth(req);
 
@@ -242,10 +279,6 @@ app.get("/api/rides", requireAuth(), async (req, res) => {
 
 
 
-app.listen(PORT, () => {
-  console.log(`Cab Booking API running at http://localhost:${PORT}`);
-});
-
 app.get("/api/protected", requireAuth(), (req, res) => {
   res.json({
     success: true,
@@ -254,7 +287,7 @@ app.get("/api/protected", requireAuth(), (req, res) => {
 });
 
 
-app.post("/api/rides", requireAuth(), async (req, res) => {
+app.post("/api/rides", writeLimiter, requireAuth(), async (req, res) => {
   try {
     const { userId } = getAuth(req);
 
@@ -265,48 +298,16 @@ app.post("/api/rides", requireAuth(), async (req, res) => {
       });
     }
 
-    const { pickup, destination, rideType } = req.body;
+    const parsed = rideRequestSchema.safeParse(req.body);
 
-    if (
-      typeof pickup !== "string" ||
-      typeof destination !== "string" ||
-      !pickup.trim() ||
-      !destination.trim()
-    ) {
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        message: "Pickup and destination are required",
+        message: firstIssueMessage(parsed.error),
       });
     }
 
-    if (pickup.trim().length > 300 || destination.trim().length > 300) {
-      return res.status(400).json({
-        success: false,
-        message: "Locations must be 300 characters or fewer",
-      });
-    }
-
-    if (
-      pickup.trim().toLowerCase() ===
-      destination.trim().toLowerCase()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Pickup and destination must be different",
-      });
-    }
-
-    const allowedRideTypes = ["standard","premium", "xl"];
-
-    if (
-      typeof rideType !== "string" ||
-      !allowedRideTypes.includes(rideType)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ride type",
-      });
-    }
+    const { pickup, destination, rideType } = parsed.data;
 
     // Find the authenticated rider's application profile.
     const { data: profile, error: profileError } = await supabase
@@ -343,8 +344,8 @@ app.post("/api/rides", requireAuth(), async (req, res) => {
   .from("rides")
   .insert({
     rider_id: profile.id,
-    pickup_address: pickup.trim(),
-    dropoff_address: destination.trim(),
+    pickup_address: pickup,
+    dropoff_address: destination,
     vehicle_type: rideType,
     estimated_fare: 0,
     discount_amount: 0,
@@ -376,5 +377,29 @@ app.post("/api/rides", requireAuth(), async (req, res) => {
       message: "Ride booking failed",
     });
   }
+});
+
+// Unknown API routes.
+app.use("/api", (_req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
+});
+
+// Central error handler (must keep all four parameters).
+const errorHandler: express.ErrorRequestHandler = (error, _req, res, _next) => {
+  console.error("Unhandled request error:", error);
+
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
+  });
+};
+
+app.use(errorHandler);
+
+app.listen(PORT, () => {
+  console.log(`Cab Booking API running at http://localhost:${PORT}`);
 });
 
